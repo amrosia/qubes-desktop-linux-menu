@@ -42,13 +42,12 @@ class VMEntry:
 
         if self.vm.klass == "DispVM" and self.vm.auto_cleanup:
             self.parent_vm = self.vm.template
-            self.sort_name = (
-                f"{str(self.parent_vm.name).lower()} :{self.vm_name.lower()}"
-            )
         else:
             self.parent_vm = None
-            # the space here is to assure correct sorting for dispvm children
-            self.sort_name = self.vm_name.lower() + " "
+
+        self._folder = str(vm.features.get(constants.FOLDER_FEATURE, "")).strip()
+        self.sort_name = ""
+        self._update_sort_name()
 
         try:
             self._internal = bool(
@@ -67,6 +66,14 @@ class VMEntry:
             vm.features.get("appmenus-dispvm", False)
         )
         self.entries: List = []
+
+    def _update_sort_name(self):
+        if self.parent_vm:
+            base_sort = f"{str(self.parent_vm.name).lower()} :{self.vm_name.lower()}"
+        else:
+            # the space here is to assure correct sorting for dispvm children
+            base_sort = self.vm_name.lower() + " "
+        self.sort_name = base_sort
 
     def update_entries(
         self,
@@ -155,6 +162,17 @@ class VMEntry:
     def service_vm(self, new_value):
         self._servicevm = new_value
         self.update_entries(update_type=True)
+
+    @property
+    def folder(self):
+        """Folder name assigned to this VM for App menu grouping."""
+        return self._folder
+
+    @folder.setter
+    def folder(self, new_value):
+        self._folder = str(new_value or "").strip()
+        self._update_sort_name()
+        self.update_entries(update_label=True, update_type=True)
 
     @property
     def show_in_apps(self):
@@ -292,12 +310,11 @@ class VMManager:
         if not vm_entry:
             return
 
-        if value == "False":
-            value = False
-        value = bool(value)
-
         try:
             if feature == "internal":
+                if value == "False":
+                    value = False
+                value = bool(value)
                 vm_entry.internal = value
                 for derived in self.qapp.domains:
                     if not getattr(derived, "template", None) == vm:
@@ -306,9 +323,17 @@ class VMManager:
                     if derived_vm_entry:
                         derived_vm_entry.internal = value
             if feature == "servicevm":
+                if value == "False":
+                    value = False
+                value = bool(value)
                 vm_entry.service_vm = value
             if feature == "appmenus-dispvm":
+                if value == "False":
+                    value = False
+                value = bool(value)
                 vm_entry.show_dispvm_template_in_apps = value
+            if feature == constants.FOLDER_FEATURE:
+                vm_entry.folder = vm_entry.vm.features.get(constants.FOLDER_FEATURE, "")
         except Exception:  # pylint: disable=broad-except
             # dispatcher functions cannot raise any Exception, because
             # it will disable any future event handling
@@ -359,4 +384,11 @@ class VMManager:
         )
         self.dispatcher.add_handler(
             "domain-feature-delete:internal", self._update_domain_feature
+        )
+        self.dispatcher.add_handler(
+            "domain-feature-set:" + constants.FOLDER_FEATURE, self._update_domain_feature
+        )
+        self.dispatcher.add_handler(
+            "domain-feature-delete:" + constants.FOLDER_FEATURE,
+            self._update_domain_feature,
         )

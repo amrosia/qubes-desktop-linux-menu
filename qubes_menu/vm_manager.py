@@ -46,9 +46,7 @@ class VMEntry:
         else:
             self.parent_vm = None
 
-        self._folder = str(
-            vm.features.get(constants.FOLDER_FEATURE, "")
-        ).strip()
+        self._folder = self._safe_feature_get(constants.FOLDER_FEATURE, "")
         self.sort_name = ""
         self._update_sort_name()
 
@@ -73,6 +71,12 @@ class VMEntry:
             vm.features.get("appmenus-dispvm", False)
         )
         self.entries: List = []
+
+    def _safe_feature_get(self, feature_name: str, default=""):
+        try:
+            return str(self.vm.features.get(feature_name, default)).strip()
+        except Exception:  # pylint: disable=broad-except
+            return str(default).strip()
 
     def _update_sort_name(self):
         if self.parent_vm:
@@ -352,9 +356,12 @@ class VMManager:
                 value = bool(value)
                 vm_entry.show_dispvm_template_in_apps = value
             if feature == constants.FOLDER_FEATURE:
-                vm_entry.folder = vm_entry.vm.features.get(
-                    constants.FOLDER_FEATURE, ""
-                )
+                if "delete" in str(_event):
+                    vm_entry.folder = ""
+                else:
+                    vm_entry.folder = vm_entry._safe_feature_get(
+                        constants.FOLDER_FEATURE, ""
+                    )
             if feature in (
                 constants.FOLDER_FEATURE_APPS,
                 constants.FOLDER_FEATURE_TEMPLATES,

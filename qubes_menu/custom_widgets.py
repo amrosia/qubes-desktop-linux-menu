@@ -426,7 +426,9 @@ class FolderRow(HoverListBox):
         self.sort_order = ""
         # compatibility with older code/tests iterating vm_list rows and
         # expecting each row to expose vm_entry.* attributes
-        self.vm_entry = SimpleNamespace(is_dispvm_template=False, parent_vm=None)
+        self.vm_entry = SimpleNamespace(
+            is_dispvm_template=False, parent_vm=None
+        )
 
         self.get_style_context().add_class("vm_entry")
         self.get_style_context().add_class("folder_entry")

@@ -556,3 +556,72 @@ def test_unknown_vm_folder_falls_back_to_ungrouped(
     assert app_page._effective_vm_folder(vm_entry) == app_page.UNGROUPED
     assert app_page._is_row_visible(vm_row)
 
+
+def test_folder_list_roundtrip_with_space_and_backslash_in_names():
+    """Folder names containing a literal space or backslash must survive the
+    feature-value format: the escape character itself has to be escapable."""
+    names = [
+        "My Folder",
+        "back\\slash",
+        "space \\ and space",
+        "plain",
+        "Ungrouped",
+    ]
+    encoded = AppPage._encode_folder_list(names)
+    # an unescaped space still separates entries; the escape character
+    # itself is escaped, so backslashes in names stay literal
+    assert AppPage._encode_folder_list(["My Folder"]) == r"My\ Folder"
+    assert AppPage._encode_folder_list(["back\\slash"]) == r"back\\slash"
+    assert AppPage._encode_folder_list(["space \\ and space"]) == (
+        r"space\ \\\ and\ space"
+    )
+    assert AppPage._decode_folder_list(encoded) == names
+    assert AppPage._encode_folder_list(["\\", " "]) == r"\\ \ "
+    assert AppPage._decode_folder_list(r"\\ \ ") == ["\\", " "]
+    assert AppPage._decode_folder_list(r"a\\ b c") == ["a\\", "b", "c"]
+    assert AppPage._decode_folder_list(r"a\ b c") == ["a b", "c"]
+
+
+def test_folder_state_with_names_containing_spaces(
+    test_desktop_file_path, test_qapp, test_builder
+):
+    """menu-folder-order keeps folders with spaces as single entries."""
+    dispatcher = MockDispatcher(test_qapp)
+    vm_manager = VMManager(test_qapp, dispatcher)
+
+    with mock.patch.object(
+        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
+    ):
+        desktop_file_manager = DesktopFileManager(test_qapp)
+
+    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page.toggle_buttons.apps_toggle.set_active(True)
+
+    dom0_mock = test_qapp._qubes["dom0"]
+
+    def fake_save():
+        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = (
+            AppPage._encode_folder_list(app_page.folder_order)
+        )
+        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = (
+            AppPage._encode_folder_list(app_page.collapsed_folders)
+        )
+        dom0_mock.update_calls()
+
+    app_page._save_folder_state = fake_save
+
+    vm_entry = vm_manager.load_vm_from_name("test-red")
+    assert vm_entry
+    vm_entry.vm.features = {}
+    app_page._assign_folder(vm_entry, "sys usb")
+
+    assert app_page.folder_order == [app_page.UNGROUPED, "sys usb"]
+    # stored with the space escaped so it is not read back as two folders
+    assert (
+        dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
+        == "Ungrouped sys\\ usb"
+    )
+
+    # reloading reads it back as exactly one folder
+    app_page._load_folder_state()
+    assert app_page.folder_order == [app_page.UNGROUPED, "sys usb"]

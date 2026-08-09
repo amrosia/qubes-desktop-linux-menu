@@ -21,7 +21,7 @@
 Application page and related widgets and logic
 """
 
-from typing import Optional, Dict, List, Set
+from typing import Optional, Dict, List, Set, Iterable
 
 from .desktop_file_manager import DesktopFileManager
 from .custom_widgets import (
@@ -706,17 +706,53 @@ class AppPage(MenuPage):
         self._save_folder_state()
         self.vm_list.invalidate_filter()
 
+    @staticmethod
+    def _decode_folder_list(raw: str) -> List[str]:
+        """Turn a menu-folder feature value into a list of folder names.
+
+        An unescaped space separates entries; a backslash escapes the next
+        character (``\\ `` is a literal space, ``\\\\`` a literal
+        backslash), so folder names may safely contain spaces or backslashes.
+        """
+        names = []
+        current: List[str] = []
+        escaped = False
+        for char in raw:
+            if escaped:
+                current.append(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == " ":
+                names.append("".join(current))
+                current = []
+            else:
+                current.append(char)
+        if escaped:
+            current.append("\\")
+        names.append("".join(current))
+        return names
+
+    @staticmethod
+    def _encode_folder_list(folders: Iterable[str]) -> str:
+        """Serialize folder names for storage; inverse of _decode_folder_list."""
+        return " ".join(
+            name.replace("\\", "\\\\").replace(" ", "\\ ") for name in folders
+        )
+
     def _load_folder_state(self):
         try:
             raw_order = str(
                 self.local_vm.features.get(self.FOLDER_ORDER_FEATURE, "")
-            ).split()
+            )
+            raw_order = self._decode_folder_list(raw_order)
         except Exception:  # pylint: disable=broad-except
             raw_order = []
         try:
             raw_collapsed = str(
                 self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "")
-            ).split()
+            )
+            raw_collapsed = self._decode_folder_list(raw_collapsed)
         except Exception:  # pylint: disable=broad-except
             raw_collapsed = []
 
@@ -731,11 +767,11 @@ class AppPage(MenuPage):
             f for f in self.folder_order if f in self.collapsed_folders
         ]
         try:
-            self.local_vm.features[self.FOLDER_ORDER_FEATURE] = " ".join(
-                self.folder_order
+            self.local_vm.features[self.FOLDER_ORDER_FEATURE] = (
+                self._encode_folder_list(self.folder_order)
             )
-            self.local_vm.features[self.FOLDER_COLLAPSED_FEATURE] = " ".join(
-                collapsed
+            self.local_vm.features[self.FOLDER_COLLAPSED_FEATURE] = (
+                self._encode_folder_list(collapsed)
             )
         except Exception:  # pylint: disable=broad-except
             # a wrapper, to make sure a qrexec problem does not crash the

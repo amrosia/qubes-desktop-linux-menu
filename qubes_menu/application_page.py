@@ -56,12 +56,8 @@ class VMTypeToggle:
         :param builder: Gtk.Builder, containing loaded glade data
         """
         self.apps_toggle: Gtk.RadioButton = builder.get_object("apps_toggle")
-        self.templates_toggle: Gtk.RadioButton = builder.get_object(
-            "templates_toggle"
-        )
-        self.system_toggle: Gtk.RadioButton = builder.get_object(
-            "system_toggle"
-        )
+        self.templates_toggle: Gtk.RadioButton = builder.get_object("templates_toggle")
+        self.system_toggle: Gtk.RadioButton = builder.get_object("system_toggle")
         self.vm_list: Gtk.ListBox = builder.get_object("vm_list")
         self.app_list: Gtk.ListBox = builder.get_object("app_list")
 
@@ -181,9 +177,7 @@ class AppPage(MenuPage):
         self.sort_running = False  # Sort running VMs to top
         self.desktop_file_manager = desktop_file_manager
         self.vm_manager = vm_manager
-        self.local_vm = self.vm_manager.qapp.domains[
-            self.vm_manager.qapp.local_name
-        ]
+        self.local_vm = self.vm_manager.qapp.domains[self.vm_manager.qapp.local_name]
         self.vm_rows: Dict[str, VMRow] = {}
         self.folder_rows: Dict[str, FolderRow] = {}
         self.scope_folder_order: Dict[str, List[str]] = {
@@ -306,9 +300,7 @@ class AppPage(MenuPage):
         """
         if not scope:
             scope = self._current_scope()
-        raw = self._safe_feature_get(
-            vm_entry.vm, constants.FOLDER_FEATURE, ""
-        )
+        raw = self._safe_feature_get(vm_entry.vm, constants.FOLDER_FEATURE, "")
         if not raw:
             return ""
         try:
@@ -342,9 +334,7 @@ class AppPage(MenuPage):
         Stores a JSON dict keyed by scope so that multi-scope VMs can carry
         independent folder assignments per scope.
         """
-        raw = AppPage._safe_feature_get(
-            vm_entry.vm, constants.FOLDER_FEATURE, "{}"
-        )
+        raw = AppPage._safe_feature_get(vm_entry.vm, constants.FOLDER_FEATURE, "{}")
         try:
             data = json.loads(raw) if raw else {}
         except (TypeError, json.JSONDecodeError):
@@ -358,9 +348,7 @@ class AppPage(MenuPage):
         else:
             data.pop(scope, None)
             if data:
-                vm_entry.vm.features[constants.FOLDER_FEATURE] = json.dumps(
-                    data
-                )
+                vm_entry.vm.features[constants.FOLDER_FEATURE] = json.dumps(data)
             else:
                 try:
                     del vm_entry.vm.features[constants.FOLDER_FEATURE]
@@ -484,9 +472,7 @@ class AppPage(MenuPage):
             if folder_name == current_folder:
                 continue
             item = Gtk.MenuItem(label=folder_name)
-            item.connect(
-                "activate", self._assign_folder_to_vm, vm_entry, folder_name
-            )
+            item.connect("activate", self._assign_folder_to_vm, vm_entry, folder_name)
             submenu.add(item)
 
         create_item = Gtk.MenuItem(label="Create new folder…")
@@ -495,9 +481,7 @@ class AppPage(MenuPage):
 
         if include_remove:
             remove_item = Gtk.MenuItem(label="Remove from folder")
-            remove_item.connect(
-                "activate", self._assign_folder_to_vm, vm_entry, ""
-            )
+            remove_item.connect("activate", self._assign_folder_to_vm, vm_entry, "")
             submenu.add(remove_item)
 
         submenu.show_all()
@@ -512,9 +496,7 @@ class AppPage(MenuPage):
             return
         self._assign_folder(vm_entry, folder_name)
 
-    def _assign_folder_to_vm(
-        self, _widget, vm_entry: VMEntry, folder_name: str
-    ):
+    def _assign_folder_to_vm(self, _widget, vm_entry: VMEntry, folder_name: str):
         self._assign_folder(vm_entry, folder_name)
 
     def _rename_folder_from_row(self, _widget, row: VMRow):
@@ -548,13 +530,9 @@ class AppPage(MenuPage):
         if folder_name:
             folder_added = folder_name not in self.folder_order
             self._ensure_folder_exists(folder_name)
-            self._set_vm_folder(
-                vm_entry, folder_name, self._current_scope()
-            )
+            self._set_vm_folder(vm_entry, folder_name, self._current_scope())
         else:
-            self._set_vm_folder(
-                vm_entry, "", self._current_scope()
-            )
+            self._set_vm_folder(vm_entry, "", self._current_scope())
         if folder_added:
             self._save_scope_state()
             self._rebuild_folder_rows()
@@ -584,9 +562,7 @@ class AppPage(MenuPage):
         for vm_entry in self.vm_manager.vms.values():
             if self._vm_folder(vm_entry) != old_name:
                 continue
-            self._set_vm_folder(
-                vm_entry, new_name if new_name else "", scope
-            )
+            self._set_vm_folder(vm_entry, new_name if new_name else "", scope)
 
         self._save_scope_state()
         self._rebuild_folder_rows()
@@ -647,15 +623,11 @@ class AppPage(MenuPage):
 
         if row.folder_name != self.UNGROUPED:
             rename_folder = Gtk.MenuItem(label="Rename folder…")
-            rename_folder.connect(
-                "activate", self._rename_folder_from_folder_row, row
-            )
+            rename_folder.connect("activate", self._rename_folder_from_folder_row, row)
             menu.add(rename_folder)
 
             delete_folder = Gtk.MenuItem(label="Delete folder")
-            delete_folder.connect(
-                "activate", self._delete_folder_from_folder_row, row
-            )
+            delete_folder.connect("activate", self._delete_folder_from_folder_row, row)
             menu.add(delete_folder)
 
         move_up = Gtk.MenuItem(label="Move folder up")
@@ -723,9 +695,7 @@ class AppPage(MenuPage):
 
     def _load_folder_state_all(self):
         try:
-            raw = self.local_vm.features.get(
-                self.FOLDER_COLLAPSED_FEATURE, "{}"
-            )
+            raw = self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "{}")
         except Exception:  # pylint: disable=broad-except
             raw = "{}"
         try:
@@ -749,9 +719,7 @@ class AppPage(MenuPage):
             allowed_collapsed = set(folders)
             allowed_collapsed.add(self.UNGROUPED)
             collapsed_set = {
-                f
-                for f in collapsed
-                if isinstance(f, str) and f in allowed_collapsed
+                f for f in collapsed if isinstance(f, str) and f in allowed_collapsed
             }
 
             self.scope_folder_order[scope] = folders
@@ -759,9 +727,7 @@ class AppPage(MenuPage):
 
     def _save_scope_state(self):
         try:
-            raw = self.local_vm.features.get(
-                self.FOLDER_COLLAPSED_FEATURE, "{}"
-            )
+            raw = self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "{}")
         except Exception:  # pylint: disable=broad-except
             raw = "{}"
         try:
@@ -772,13 +738,9 @@ class AppPage(MenuPage):
             state = {}
 
         scope = self._current_scope()
-        collapsed = [
-            f for f in self.folder_order if f in self.collapsed_folders
-        ]
+        collapsed = [f for f in self.folder_order if f in self.collapsed_folders]
         state[scope] = {"folders": self.folder_order, "collapsed": collapsed}
-        self.local_vm.features[
-            self.FOLDER_COLLAPSED_FEATURE
-        ] = json.dumps(state)
+        self.local_vm.features[self.FOLDER_COLLAPSED_FEATURE] = json.dumps(state)
         self.scope_folder_order[scope] = self.folder_order.copy()
         self.scope_collapsed_folders[scope] = self.collapsed_folders.copy()
 
@@ -886,12 +848,10 @@ class AppPage(MenuPage):
             return False
         if (
             appentry.app_info.vm
-            and appentry.app_info.vm.name
-            != self.selected_vm_entry.vm_entry.vm_name
+            and appentry.app_info.vm.name != self.selected_vm_entry.vm_entry.vm_name
         ):
             return (
-                self.selected_vm_entry.vm_entry.parent_vm
-                == appentry.app_info.vm.name
+                self.selected_vm_entry.vm_entry.parent_vm == appentry.app_info.vm.name
                 and not appentry.app_info.disposable
             )
         if self.selected_vm_entry.vm_entry.is_dispvm_template:
@@ -948,9 +908,7 @@ class AppPage(MenuPage):
                 row.vm_entry, self.toggle_buttons.apps_toggle.get_active()
             )
             self.control_list.unselect_all()
-            self.app_list.ephemeral_vm = bool(
-                self.selected_vm_entry.vm_entry.parent_vm
-            )
+            self.app_list.ephemeral_vm = bool(self.selected_vm_entry.vm_entry.parent_vm)
         self.app_list.invalidate_filter()
 
     def _set_right_visibility(self, visibility: bool):

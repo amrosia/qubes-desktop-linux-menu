@@ -59,12 +59,8 @@ def test_vm_manager(test_qapp):
     )
     assert entry_template.has_network
 
-    test_qapp._qubes[vm_name].properties["label"] = Property(
-        "red", "label", False
-    )
-    test_qapp._qubes[vm_name].properties["icon"] = Property(
-        "appvm-red", "str", False
-    )
+    test_qapp._qubes[vm_name].properties["label"] = Property("red", "label", False)
+    test_qapp._qubes[vm_name].properties["icon"] = Property("appvm-red", "str", False)
     test_qapp._qubes[vm_name].update_calls()
     vm_manager._update_domain_property(
         vm_name,
@@ -174,9 +170,7 @@ def test_folder_feature_events_update_entry(test_qapp):
     entry_test = vm_manager.load_vm_from_name(vm_name)
     assert entry_test
 
-    with mock.patch.object(
-        entry_test, "safe_feature_get", return_value="Work"
-    ):
+    with mock.patch.object(entry_test, "safe_feature_get", return_value="Work"):
         with mock.patch.object(entry_test, "update_entries") as update_entries:
             vm_manager._update_domain_feature(
                 vm_name,
@@ -184,9 +178,7 @@ def test_folder_feature_events_update_entry(test_qapp):
                 feature=constants.FOLDER_FEATURE,
                 value="Work",
             )
-            update_entries.assert_called_once_with(
-                update_label=True, update_type=True
-            )
+            update_entries.assert_called_once_with(update_label=True, update_type=True)
             assert entry_test.folder == "Work"
 
     with mock.patch.object(entry_test, "update_entries") as update_entries:
@@ -195,9 +187,7 @@ def test_folder_feature_events_update_entry(test_qapp):
             f"feature-delete:{constants.FOLDER_FEATURE}",
             feature=constants.FOLDER_FEATURE,
         )
-        update_entries.assert_called_once_with(
-            update_label=True, update_type=True
-        )
+        update_entries.assert_called_once_with(update_label=True, update_type=True)
         assert entry_test.folder == ""
 
 

@@ -45,45 +45,26 @@ def test_app_page_vm_state(test_desktop_file_path, test_qapp, test_builder):
 
     # select dom0
     app_page.vm_list.select_row(
-        [
-            row
-            for row in app_page.vm_list.get_children()
-            if row.vm_name == "dom0"
-        ][0]
+        [row for row in app_page.vm_list.get_children() if row.vm_name == "dom0"][0]
     )
     assert app_page.control_list.start_item.row_label.get_label() == " "
     assert app_page.control_list.pause_item.row_label.get_label() == " "
 
     # select a turned off vm
     app_page.vm_list.select_row(
-        [
-            row
-            for row in app_page.vm_list.get_children()
-            if row.vm_name == "test-red"
-        ][0]
+        [row for row in app_page.vm_list.get_children() if row.vm_name == "test-red"][0]
     )
 
-    assert (
-        app_page.control_list.start_item.row_label.get_label() == "Start qube"
-    )
+    assert app_page.control_list.start_item.row_label.get_label() == "Start qube"
     assert app_page.control_list.pause_item.row_label.get_label() == " "
 
     # select a turned on vm
     app_page.vm_list.select_row(
-        [
-            row
-            for row in app_page.vm_list.get_children()
-            if row.vm_name == "sys-usb"
-        ][0]
+        [row for row in app_page.vm_list.get_children() if row.vm_name == "sys-usb"][0]
     )
 
-    assert (
-        app_page.control_list.start_item.row_label.get_label()
-        == "Shutdown qube"
-    )
-    assert (
-        app_page.control_list.pause_item.row_label.get_label() == "Pause qube"
-    )
+    assert app_page.control_list.start_item.row_label.get_label() == "Shutdown qube"
+    assert app_page.control_list.pause_item.row_label.get_label() == "Pause qube"
 
     # select a turned off disposable template
     app_page.vm_list.select_row(
@@ -104,13 +85,8 @@ def test_app_page_vm_state(test_desktop_file_path, test_qapp, test_builder):
             if row.vm_name == "test-alt-dvm-running"
         ][0]
     )
-    assert (
-        app_page.control_list.start_item.row_label.get_label()
-        == "Shutdown qube"
-    )
-    assert (
-        app_page.control_list.pause_item.row_label.get_label() == "Pause qube"
-    )
+    assert app_page.control_list.start_item.row_label.get_label() == "Shutdown qube"
+    assert app_page.control_list.pause_item.row_label.get_label() == "Pause qube"
 
 
 def test_dispvm_parent_sorting(test_desktop_file_path, test_qapp, test_builder):
@@ -193,17 +169,17 @@ def test_folder_create_assign_rename_delete(
 
     app_page._assign_folder(vm_entry, "Work")
     assert app_page._vm_folder(vm_entry) == "Work"
-    assert json.loads(
-        vm_entry.vm.features[constants.FOLDER_FEATURE]
-    ) == {"apps": "Work"}
+    assert json.loads(vm_entry.vm.features[constants.FOLDER_FEATURE]) == {
+        "apps": "Work"
+    }
 
     app_page._rename_folder("Work", "Projects")
     assert "Work" not in app_page.folder_order
     assert "Projects" in app_page.folder_order
     assert app_page._vm_folder(vm_entry) == "Projects"
-    assert json.loads(
-        vm_entry.vm.features[constants.FOLDER_FEATURE]
-    ) == {"apps": "Projects"}
+    assert json.loads(vm_entry.vm.features[constants.FOLDER_FEATURE]) == {
+        "apps": "Projects"
+    }
 
     app_page._delete_folder("Projects")
     assert "Projects" not in app_page.folder_order
@@ -255,9 +231,7 @@ def test_folder_move_and_collapsed_state_saved(
 def test_folder_state_is_scope_specific(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    test_qapp._qubes["dom0"].features[
-        constants.FOLDER_COLLAPSED_FEATURE
-    ] = json.dumps(
+    test_qapp._qubes["dom0"].features[constants.FOLDER_COLLAPSED_FEATURE] = json.dumps(
         {
             "apps": {
                 "folders": ["Ungrouped", "AppsOnly"],
@@ -296,9 +270,7 @@ def test_folder_state_is_scope_specific(
     assert app_page.folder_order == ["Ungrouped", "SvcOnly"]
 
 
-def test_folder_selection_menu_entries(
-    test_desktop_file_path, test_qapp, test_builder
-):
+def test_folder_selection_menu_entries(test_desktop_file_path, test_qapp, test_builder):
     dispatcher = MockDispatcher(test_qapp)
     vm_manager = VMManager(test_qapp, dispatcher)
 

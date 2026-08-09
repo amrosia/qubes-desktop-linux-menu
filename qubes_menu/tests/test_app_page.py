@@ -28,6 +28,42 @@ from ..application_page import AppPage
 from ..settings_page import SettingsPage
 
 
+def _build_app_page(test_desktop_file_path, test_qapp, test_builder):
+    dispatcher = MockDispatcher(test_qapp)
+    vm_manager = VMManager(test_qapp, dispatcher)
+    with mock.patch.object(
+        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
+    ):
+        desktop_file_manager = DesktopFileManager(test_qapp)
+    return AppPage(vm_manager, test_builder, desktop_file_manager), vm_manager
+
+
+def _install_fake_save(app_page, test_qapp):
+    """Mirror _save_folder_state into the mock feature store; feature
+    writes through the dom0 qubesadmin wrapper raise and are swallowed."""
+    dom0_mock = test_qapp._qubes["dom0"]
+
+    def fake_save():
+        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = (
+            AppPage._encode_folder_list(app_page.folder_order)
+        )
+        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = (
+            AppPage._encode_folder_list(app_page.collapsed_folders)
+        )
+        dom0_mock.update_calls()
+
+    app_page._save_folder_state = fake_save
+    return dom0_mock
+
+
+def _assign_folders(app_page, vm_manager, assignments):
+    for vm_name, folder in assignments:
+        vm_entry = vm_manager.load_vm_from_name(vm_name)
+        assert vm_entry
+        vm_entry.vm.features = {}
+        app_page._assign_folder(vm_entry, folder)
+
+
 def test_app_page_vm_state(test_desktop_file_path, test_qapp, test_builder):
     dispatcher = MockDispatcher(test_qapp)
     vm_manager = VMManager(test_qapp, dispatcher)
@@ -171,15 +207,9 @@ def test_settings_app_page(test_desktop_file_path, test_qapp, test_builder):
 def test_folder_create_assign_rename_delete(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
     app_page._save_folder_state = mock.Mock()
 
@@ -207,40 +237,16 @@ def test_folder_create_assign_rename_delete(
 def test_folder_move_and_collapsed_state_saved(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-
-    # The mock app cannot observe feature writes made through the dom0
-    # qubesadmin wrapper (they raise and are swallowed); mirror saves into
-    # the mock feature store instead, like other tests do with update_calls.
-    dom0_mock = test_qapp._qubes["dom0"]
-
-    def fake_save():
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = " ".join(
-            app_page.folder_order
-        )
-        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = " ".join(
-            sorted(app_page.collapsed_folders)
-        )
-        dom0_mock.update_calls()
-
-    app_page._save_folder_state = fake_save
-
-    for name, folder in zip(
-        ["test-red", "sys-usb", "test-vm"], ["A", "B", "C"]
-    ):
-        vm_entry = vm_manager.load_vm_from_name(name)
-        assert vm_entry
-        vm_entry.vm.features = {}
-        app_page._assign_folder(vm_entry, folder)
+    dom0_mock = _install_fake_save(app_page, test_qapp)
+    _assign_folders(
+        app_page,
+        vm_manager,
+        [("test-red", "A"), ("sys-usb", "B"), ("test-vm", "C")],
+    )
 
     assert app_page.folder_order == [app_page.UNGROUPED, "A", "B", "C"]
     assert (
@@ -274,37 +280,16 @@ def test_folder_move_and_collapsed_state_saved(
 def test_folder_reordering_is_not_pinned_to_ungrouped(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-
-    dom0_mock = test_qapp._qubes["dom0"]
-
-    def fake_save():
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = " ".join(
-            app_page.folder_order
-        )
-        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = " ".join(
-            sorted(app_page.collapsed_folders)
-        )
-        dom0_mock.update_calls()
-
-    app_page._save_folder_state = fake_save
-
-    for name, folder in zip(
-        ["test-red", "sys-usb", "test-vm"], ["A", "B", "C"]
-    ):
-        vm_entry = vm_manager.load_vm_from_name(name)
-        assert vm_entry
-        vm_entry.vm.features = {}
-        app_page._assign_folder(vm_entry, folder)
+    dom0_mock = _install_fake_save(app_page, test_qapp)
+    _assign_folders(
+        app_page,
+        vm_manager,
+        [("test-red", "A"), ("sys-usb", "B"), ("test-vm", "C")],
+    )
 
     assert app_page.folder_order == [app_page.UNGROUPED, "A", "B", "C"]
 
@@ -332,17 +317,13 @@ def test_folder_reordering_is_not_pinned_to_ungrouped(
             expected
         )
 
-    # a real folder may move onto the first slot - nothing is pinned
     move_and_check("A", -1)
     assert app_page.folder_order != [app_page.UNGROUPED, "A", "B", "C"]
 
-    # Ungrouped itself is movable in both directions and the persisted
-    # order keeps its position after the reload done on each rebuild
     move_and_check(app_page.UNGROUPED, 1)
     assert app_page.folder_order[0] != app_page.UNGROUPED
     move_and_check(app_page.UNGROUPED, -1)
 
-    # at the ends there is no visible neighbor: the move is a no-op
     move_and_check("C", 1)
     move_and_check("A", -1)
 
@@ -353,68 +334,43 @@ def test_folder_rebuild_is_deferred_while_popup_is_open(
     """Folder operations run from an open context menu (the popup's anchor
     row is destroyed by the rebuild) must defer the row rebuild out of the
     popup emission; state and persistence stay synchronous."""
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-
-    dom0_mock = test_qapp._qubes["dom0"]
-
-    def fake_save():
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = " ".join(
-            app_page.folder_order
-        )
-        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = " ".join(
-            sorted(app_page.collapsed_folders)
-        )
-        dom0_mock.update_calls()
-
-    app_page._save_folder_state = fake_save
-
-    for name, folder in zip(
-        ["test-red", "sys-usb", "test-vm"], ["A", "B", "C"]
-    ):
-        vm_entry = vm_manager.load_vm_from_name(name)
-        assert vm_entry
-        vm_entry.vm.features = {}
-        app_page._assign_folder(vm_entry, folder)
+    dom0_mock = _install_fake_save(app_page, test_qapp)
+    _assign_folders(
+        app_page,
+        vm_manager,
+        [("test-red", "A"), ("sys-usb", "B"), ("test-vm", "C")],
+    )
 
     assert app_page.folder_order == [app_page.UNGROUPED, "A", "B", "C"]
 
-    # while a menu is open the rebuild is deferred to the next main loop
-    # iteration instead of running inside the menu's activate emission
-    with mock.patch.object(SelfAwareMenu, "OPEN_MENUS", 1):
-        with mock.patch.object(app_page, "_rebuild_folder_rows") as rebuild:
-            with mock.patch(
-                "qubes_menu.application_page.GLib.idle_add"
-            ) as idle_add:
-                app_page._move_folder(None, "B", -1)
-                rebuild.assert_not_called()
-                idle_add.assert_called_once()
+    with mock.patch.object(SelfAwareMenu, "OPEN_MENUS", 1), mock.patch.object(
+        app_page, "_rebuild_folder_rows"
+    ) as rebuild, mock.patch(
+        "qubes_menu.application_page.GLib.idle_add"
+    ) as idle_add:
+        app_page._move_folder(None, "B", -1)
+        rebuild.assert_not_called()
+        idle_add.assert_called_once()
 
-                # state and persistence are already updated synchronously
-                assert app_page.folder_order == [
-                    app_page.UNGROUPED,
-                    "B",
-                    "A",
-                    "C",
-                ]
-                assert (
-                    dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
-                    == "Ungrouped B A C"
-                )
+        assert app_page.folder_order == [
+            app_page.UNGROUPED,
+            "B",
+            "A",
+            "C",
+        ]
+        assert (
+            dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
+            == "Ungrouped B A C"
+        )
 
-                # run the deferred rebuild the way the main loop would
-                idle_add.call_args.args[0]()
-                rebuild.assert_called_once()
+        # invoke the deferred rebuild the way the main loop would
+        idle_add.call_args.args[0]()
+        rebuild.assert_called_once()
 
-    # outside of a menu the rebuild stays synchronous
     with mock.patch.object(app_page, "_rebuild_folder_rows") as rebuild:
         app_page._move_folder(None, "C", -1)
         rebuild.assert_called_once()
@@ -429,8 +385,6 @@ def test_folder_rebuild_is_deferred_while_popup_is_open(
 def test_folder_state_is_global_across_tabs(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    # Folder organization is global: the same folder list and collapsed
-    # state apply in every scope (Apps, Templates, Service).
     test_qapp._qubes["test-red"].features[constants.FOLDER_FEATURE] = "Work"
     test_qapp._qubes["dom0"].features[
         constants.FOLDER_ORDER_FEATURE
@@ -440,15 +394,9 @@ def test_folder_state_is_global_across_tabs(
     ] = "Work"
     test_qapp.update_vm_calls()
 
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, _vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     assert app_page.folder_order == ["Ungrouped", "Work"]
     assert app_page.collapsed_folders == {"Work"}
 
@@ -464,15 +412,9 @@ def test_folder_state_is_global_across_tabs(
 def test_empty_folders_are_not_displayed(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
     app_page._save_folder_state = mock.Mock()
 
@@ -480,15 +422,12 @@ def test_empty_folders_are_not_displayed(
     assert vm_entry
     vm_entry.vm.features = {}
 
-    # a folder with no assigned qube is never shown
     app_page._create_folder("Empty")
     assert "Empty" not in app_page.folder_order
 
     app_page._assign_folder(vm_entry, "Work")
     assert app_page.folder_order == [app_page.UNGROUPED, "Work"]
 
-    # moving the last qube out removes the folder instead of showing an
-    # empty section
     app_page._assign_folder(vm_entry, "")
     assert app_page.folder_order == [app_page.UNGROUPED]
     assert app_page._vm_folder(vm_entry) == ""
@@ -501,15 +440,9 @@ def test_empty_folders_are_not_displayed(
 def test_folder_selection_menu_entries(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
     app_page._save_folder_state = mock.Mock()
 
@@ -536,15 +469,9 @@ def test_folder_selection_menu_entries(
 def test_unknown_vm_folder_falls_back_to_ungrouped(
     test_desktop_file_path, test_qapp, test_builder
 ):
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
 
     vm_entry = vm_manager.load_vm_from_name("test-red")
@@ -568,8 +495,6 @@ def test_folder_list_roundtrip_with_space_and_backslash_in_names():
         "Ungrouped",
     ]
     encoded = AppPage._encode_folder_list(names)
-    # an unescaped space still separates entries; the escape character
-    # itself is escaped, so backslashes in names stay literal
     assert AppPage._encode_folder_list(["My Folder"]) == r"My\ Folder"
     assert AppPage._encode_folder_list(["back\\slash"]) == r"back\\slash"
     assert AppPage._encode_folder_list(["space \\ and space"]) == (
@@ -586,29 +511,11 @@ def test_folder_state_with_names_containing_spaces(
     test_desktop_file_path, test_qapp, test_builder
 ):
     """menu-folder-order keeps folders with spaces as single entries."""
-    dispatcher = MockDispatcher(test_qapp)
-    vm_manager = VMManager(test_qapp, dispatcher)
-
-    with mock.patch.object(
-        DesktopFileManager, "desktop_dirs", [test_desktop_file_path]
-    ):
-        desktop_file_manager = DesktopFileManager(test_qapp)
-
-    app_page = AppPage(vm_manager, test_builder, desktop_file_manager)
+    app_page, vm_manager = _build_app_page(
+        test_desktop_file_path, test_qapp, test_builder
+    )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-
-    dom0_mock = test_qapp._qubes["dom0"]
-
-    def fake_save():
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = (
-            AppPage._encode_folder_list(app_page.folder_order)
-        )
-        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = (
-            AppPage._encode_folder_list(app_page.collapsed_folders)
-        )
-        dom0_mock.update_calls()
-
-    app_page._save_folder_state = fake_save
+    dom0_mock = _install_fake_save(app_page, test_qapp)
 
     vm_entry = vm_manager.load_vm_from_name("test-red")
     assert vm_entry
@@ -616,12 +523,10 @@ def test_folder_state_with_names_containing_spaces(
     app_page._assign_folder(vm_entry, "sys usb")
 
     assert app_page.folder_order == [app_page.UNGROUPED, "sys usb"]
-    # stored with the space escaped so it is not read back as two folders
     assert (
         dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
         == "Ungrouped sys\\ usb"
     )
 
-    # reloading reads it back as exactly one folder
     app_page._load_folder_state()
     assert app_page.folder_order == [app_page.UNGROUPED, "sys usb"]

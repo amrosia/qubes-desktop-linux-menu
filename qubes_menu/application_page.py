@@ -159,11 +159,8 @@ class AppPage(MenuPage):
 
     UNGROUPED = "Ungrouped"
 
-    # Per-VM folder assignment is stored as a single feature on the VM
-    # itself (a plain folder name). Folder order and collapsed state are
-    # dom0 features with plain space-separated values - folders are simple
-    # section separators, so they apply to all menu scopes (Apps, Templates,
-    # Service) alike.
+    # Per-VM assignment is a single plain feature value; order and
+    # collapsed state are global dom0 features for all menu scopes.
     FOLDER_ORDER_FEATURE = constants.FOLDER_ORDER_FEATURE
     FOLDER_COLLAPSED_FEATURE = constants.FOLDER_COLLAPSED_FEATURE
 
@@ -311,7 +308,7 @@ class AppPage(MenuPage):
         except KeyError:
             pass
 
-    def _used_folder_names(self, vm_entries) -> Set[str]:
+    def _used_folder_names(self, vm_entries: Iterable[VMEntry]) -> Set[str]:
         """Return the set of folder names actually assigned to VMs."""
         used: Set[str] = set()
         for vm_entry in vm_entries:
@@ -321,15 +318,12 @@ class AppPage(MenuPage):
         return used
 
     def _order_folders(self, folders: List[str], used: Set[str]) -> List[str]:
-        """Return the folder list preserving the stored order, filtered
-        to the folders that are actually in use.
+        """Stored order filtered to the folders actually in use.
 
-        Folders are derived from per-VM membership: names no qube is
-        assigned to disappear immediately, so empty sections are never
-        displayed. Ungrouped is the virtual fallback bucket for unassigned
-        qubes - it is never removed and keeps the position the user placed
-        it in; only a brand-new install (no stored order yet) defaults to
-        putting it first. No folder is ever pinned to a specific index.
+        Names no qube is assigned to disappear, so empty sections are never
+        shown. Ungrouped is the virtual fallback bucket: it is never removed
+        and keeps the user-placed position (first on a fresh install); no
+        folder is ever pinned to an index.
         """
         result: List[str] = []
         for name in folders:
@@ -497,37 +491,21 @@ class AppPage(MenuPage):
         self._assign_folder(vm_entry, folder_name)
 
     def _rename_folder_from_row(self, _widget, row: VMRow):
-        old_name = self._vm_folder(row.vm_entry)
-        if not old_name:
-            return
-
-        new_name = self._prompt_for_text(
-            title=f"Rename folder '{old_name}'",
-            initial_value=old_name,
-        )
-        if new_name is None:
-            return
-        self._rename_folder(old_name, new_name)
+        folder = self._vm_folder(row.vm_entry)
+        if folder:
+            self._prompt_rename_folder(folder)
 
     def _delete_folder_from_row(self, _widget, row: VMRow):
         folder = self._vm_folder(row.vm_entry)
-        if not folder:
-            return
-
-        if not self._confirm(
-            title="Delete folder",
-            text=f"Delete folder '{folder}' and move all qubes to Ungrouped?",
-        ):
-            return
-        self._delete_folder(folder)
+        if folder:
+            self._prompt_delete_folder(folder)
 
     def _assign_folder(self, vm_entry: VMEntry, folder_name: str):
         folder_name = folder_name.strip()
         self._set_vm_folder(vm_entry, folder_name)
-        # rebuild first so the new assignment is reflected in the derived
-        # folder list, then persist the updated order and collapsed state
-        self._schedule_folder_rebuild()
+        self._load_folder_state()
         self._save_folder_state()
+        self._schedule_folder_rebuild()
 
     def _rename_folder(self, old_name: str, new_name: str):
         new_name = new_name.strip()
@@ -638,34 +616,33 @@ class AppPage(MenuPage):
         menu.popup_at_pointer(None)
 
     def _rename_folder_from_folder_row(self, _widget, row: FolderRow):
-        old_name = row.folder_name
-        new_name = self._prompt_for_text(
-            title=f"Rename folder '{old_name}'",
-            initial_value=old_name,
-        )
-        if new_name is None:
-            return
-        self._rename_folder(old_name, new_name)
+        self._prompt_rename_folder(row.folder_name)
 
     def _delete_folder_from_folder_row(self, _widget, row: FolderRow):
-        folder = row.folder_name
-        if not self._confirm(
+        self._prompt_delete_folder(row.folder_name)
+
+    def _prompt_rename_folder(self, folder_name: str):
+        new_name = self._prompt_for_text(
+            title=f"Rename folder '{folder_name}'",
+            initial_value=folder_name,
+        )
+        if new_name is not None:
+            self._rename_folder(folder_name, new_name)
+
+    def _prompt_delete_folder(self, folder_name: str):
+        if self._confirm(
             title="Delete folder",
-            text=f"Delete folder '{folder}' and move all qubes to Ungrouped?",
+            text=f"Delete folder '{folder_name}' and move all qubes to Ungrouped?",
         ):
-            return
-        self._delete_folder(folder)
+            self._delete_folder(folder_name)
 
     def _visible_adjacent_folder(
         self, folder_name: str, direction: int
     ) -> Optional[str]:
-        """Return the folder immediately before/after *folder_name* in the
-        currently visible order, or None if there is no such folder.
+        """Nearest visible neighbor of *folder_name* in *direction*.
 
-        Moves operate on the *visible* sequence ("the folder up/down"), not
-        on the global order: folders in between may be hidden in the current
-        tab because they contain no qubes of this category, but they still
-        occupy their slots in ``folder_order``.
+        Moves operate on the visible sequence: folders hidden in the
+        current tab keep their slots in ``folder_order``.
         """
         if folder_name not in self.folder_order:
             return None
@@ -685,7 +662,6 @@ class AppPage(MenuPage):
             return
         old_index = self.folder_order.index(folder_name)
         other_index = self.folder_order.index(other)
-        # swap the two folders; hidden folders in between keep their slots
         self.folder_order[old_index], self.folder_order[other_index] = (
             self.folder_order[other_index],
             self.folder_order[old_index],
@@ -694,7 +670,6 @@ class AppPage(MenuPage):
         self._schedule_folder_rebuild()
 
     def _set_all_folders_collapsed(self, _widget, collapsed: bool):
-        # mutate in place to preserve set references held in folder rows
         self.collapsed_folders.clear()
         if collapsed:
             self.collapsed_folders.update(self.folder_order)
@@ -708,12 +683,13 @@ class AppPage(MenuPage):
 
     @staticmethod
     def _decode_folder_list(raw: str) -> List[str]:
-        """Turn a menu-folder feature value into a list of folder names.
+        """Parse a menu-folder feature value into folder names.
 
         An unescaped space separates entries; a backslash escapes the next
-        character (``\\ `` is a literal space, ``\\\\`` a literal
-        backslash), so folder names may safely contain spaces or backslashes.
+        character, so names may contain spaces or backslashes.
         """
+        if not raw:
+            return []
         names = []
         current: List[str] = []
         escaped = False
@@ -779,14 +755,12 @@ class AppPage(MenuPage):
             pass
 
     def _schedule_folder_rebuild(self):
-        """Rebuild the folder rows, deferred out of an open popup.
+        """Rebuild folder rows, deferred out of an open popup.
 
-        The menu-driven folder operations run inside a :class:`SelfAwareMenu`
-        item's activate handler; rebuilding the rows there removes and
-        re-creates the very row the popup is anchored on while Gtk is still
-        unmapping the menu, which GTK cannot handle reliably. Main-loop
-        rebuilds are therefore deferred via ``GLib.idle_add`` whenever a menu
-        is currently open; outside of menus the rebuild stays synchronous.
+        Menu operations run inside a :class:`SelfAwareMenu` item's
+        activate handler; rebuilding there destroys the popup's anchor row
+        while GTK is still unmapping the menu. Defer via ``GLib.idle_add``
+        while a menu is open; otherwise rebuild synchronously.
         """
         if SelfAwareMenu.OPEN_MENUS:
             GLib.idle_add(self._rebuild_folder_rows)
@@ -794,11 +768,6 @@ class AppPage(MenuPage):
             self._rebuild_folder_rows()
 
     def _rebuild_folder_rows(self):
-        # Reload the persisted folder state. This is done here (and not only
-        # at startup) because the folder list is derived from per-VM folder
-        # membership: until the VM list is populated there is no way to know
-        # which folders exist, so order and collapsed state must be
-        # recomputed against the loaded VMs.
         self._load_folder_state()
 
         for child in list(self.vm_list.get_children()):

@@ -718,17 +718,19 @@ class AppPage(MenuPage):
 
     def _load_folder_state(self):
         try:
-            raw_order = str(
-                self.local_vm.features.get(self.FOLDER_ORDER_FEATURE, "")
+            raw_order = self._decode_folder_list(
+                str(self.local_vm.features.get(self.FOLDER_ORDER_FEATURE, ""))
             )
-            raw_order = self._decode_folder_list(raw_order)
         except Exception:  # pylint: disable=broad-except
             raw_order = []
         try:
-            raw_collapsed = str(
-                self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "")
+            raw_collapsed = self._decode_folder_list(
+                str(
+                    self.local_vm.features.get(
+                        self.FOLDER_COLLAPSED_FEATURE, ""
+                    )
+                )
             )
-            raw_collapsed = self._decode_folder_list(raw_collapsed)
         except Exception:  # pylint: disable=broad-except
             raw_collapsed = []
 

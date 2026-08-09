@@ -244,7 +244,9 @@ class SettingsEntry(Gtk.ListBoxRow):
         self.event_box = HoverEventBox(focus_widget=self)
         self.hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.event_box.add(self.hbox)
-        self.settings_icon = Gtk.Image.new_from_pixbuf(load_icon("settings-black"))
+        self.settings_icon = Gtk.Image.new_from_pixbuf(
+            load_icon("settings-black")
+        )
         self.hbox.pack_start(self.settings_icon, False, False, 5)
         self.settings_label = Gtk.Label(label="Settings", xalign=0)
         self.hbox.pack_start(self.settings_label, False, False, 5)
@@ -259,7 +261,9 @@ class SettingsEntry(Gtk.ListBoxRow):
     def run_app(self, vm):
         """Run settings for specified vm."""
         # pylint: disable=consider-using-with
-        subprocess.Popen(["qubes-vm-settings", vm.name], stdin=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["qubes-vm-settings", vm.name], stdin=subprocess.DEVNULL
+        )
         self.get_toplevel().get_application().hide_menu()
 
     def get_appinfo(self) -> ApplicationInfo:
@@ -422,7 +426,9 @@ class FolderRow(HoverListBox):
         self.sort_order = ""
         # compatibility with older code/tests iterating vm_list rows and
         # expecting each row to expose vm_entry.* attributes
-        self.vm_entry = SimpleNamespace(is_dispvm_template=False, parent_vm=None)
+        self.vm_entry = SimpleNamespace(
+            is_dispvm_template=False, parent_vm=None
+        )
 
         self.get_style_context().add_class("vm_entry")
         self.get_style_context().add_class("folder_entry")
@@ -627,7 +633,9 @@ class PauseControlItem(ControlRow):
 
     def __init__(self):
         super().__init__()
-        self.icon.set_from_pixbuf(load_icon("qappmenu-pause", size=None, pixel_size=15))
+        self.icon.set_from_pixbuf(
+            load_icon("qappmenu-pause", size=None, pixel_size=15)
+        )
         self.state = None
 
     def update_state(self, vm_entry: VMEntry, apps_tab: bool = False):

@@ -21,7 +21,6 @@
 Application page and related widgets and logic
 """
 
-import json
 from typing import Optional, Dict, List, Set
 
 from .desktop_file_manager import DesktopFileManager
@@ -42,7 +41,7 @@ from . import constants
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 
 class VMTypeToggle:
@@ -56,8 +55,12 @@ class VMTypeToggle:
         :param builder: Gtk.Builder, containing loaded glade data
         """
         self.apps_toggle: Gtk.RadioButton = builder.get_object("apps_toggle")
-        self.templates_toggle: Gtk.RadioButton = builder.get_object("templates_toggle")
-        self.system_toggle: Gtk.RadioButton = builder.get_object("system_toggle")
+        self.templates_toggle: Gtk.RadioButton = builder.get_object(
+            "templates_toggle"
+        )
+        self.system_toggle: Gtk.RadioButton = builder.get_object(
+            "system_toggle"
+        )
         self.vm_list: Gtk.ListBox = builder.get_object("vm_list")
         self.app_list: Gtk.ListBox = builder.get_object("app_list")
 
@@ -155,11 +158,13 @@ class AppPage(MenuPage):
     """
 
     UNGROUPED = "Ungrouped"
-    SCOPES = ["apps", "templates", "service"]
 
-    # Per-VM folder assignment uses a single feature on each VM.
-    # Scope-level state (folder order, collapsed folders) is stored
-    # in a single dom0 feature keyed by scope.
+    # Per-VM folder assignment is stored as a single feature on the VM
+    # itself (a plain folder name). Folder order and collapsed state are
+    # dom0 features with plain space-separated values - folders are simple
+    # section separators, so they apply to all menu scopes (Apps, Templates,
+    # Service) alike.
+    FOLDER_ORDER_FEATURE = constants.FOLDER_ORDER_FEATURE
     FOLDER_COLLAPSED_FEATURE = constants.FOLDER_COLLAPSED_FEATURE
 
     def __init__(
@@ -177,18 +182,14 @@ class AppPage(MenuPage):
         self.sort_running = False  # Sort running VMs to top
         self.desktop_file_manager = desktop_file_manager
         self.vm_manager = vm_manager
-        self.local_vm = self.vm_manager.qapp.domains[self.vm_manager.qapp.local_name]
+        self.local_vm = self.vm_manager.qapp.domains[
+            self.vm_manager.qapp.local_name
+        ]
         self.vm_rows: Dict[str, VMRow] = {}
         self.folder_rows: Dict[str, FolderRow] = {}
-        self.scope_folder_order: Dict[str, List[str]] = {
-            scope: [] for scope in self.SCOPES
-        }
-        self.scope_collapsed_folders: Dict[str, Set[str]] = {
-            scope: set() for scope in self.SCOPES
-        }
         self.folder_order: List[str] = []
         self.collapsed_folders: Set[str] = set()
-        self._load_folder_state_all()
+        self._load_folder_state()
 
         self.page_widget: Gtk.Box = builder.get_object("app_page")
 
@@ -203,7 +204,6 @@ class AppPage(MenuPage):
 
         desktop_file_manager.register_callback(self._app_info_callback)
         self.toggle_buttons = VMTypeToggle(builder)
-        self._activate_scope_state()
         self.toggle_buttons.connect_to_toggle(self._button_toggled)
 
         self.app_list.set_filter_func(self._is_app_fitting)
@@ -277,50 +277,23 @@ class AppPage(MenuPage):
             return self.folder_order.index(folder_name)
         return len(self.folder_order) + 1
 
-    def _current_scope(self) -> str:
-        if self.toggle_buttons.templates_toggle.get_active():
-            return "templates"
-        if self.toggle_buttons.system_toggle.get_active():
-            return "service"
-        return "apps"
+    def _vm_folder(self, vm_entry: VMEntry) -> str:
+        """Return the folder assigned to *vm_entry* (empty if none).
 
-    def _activate_scope_state(self):
-        scope = self._current_scope()
-        self.folder_order = self.scope_folder_order[scope].copy()
-        self.collapsed_folders = self.scope_collapsed_folders[scope].copy()
-        if self.UNGROUPED not in self.folder_order:
-            self.folder_order.insert(0, self.UNGROUPED)
-
-    def _vm_folder(self, vm_entry: VMEntry, scope: Optional[str] = None) -> str:
-        """Return the folder assigned to *vm_entry* in *scope*.
-
-        The per-VM feature stores a JSON dict keyed by scope so that VMs
-        appearing in multiple scopes (e.g. DispVM templates shown in both
-        Apps and Templates) can carry different folder assignments.
+        A single plain-text folder name is stored per VM; the same folder
+        applies in every menu scope (Apps, Templates, Service) in which the
+        VM is shown.
         """
-        if not scope:
-            scope = self._current_scope()
-        raw = self._safe_feature_get(vm_entry.vm, constants.FOLDER_FEATURE, "")
-        if not raw:
-            return ""
-        try:
-            data = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
-            return ""
-        if isinstance(data, dict):
-            return data.get(scope, "")
-        return ""
+        return self._safe_feature_get(vm_entry.vm, constants.FOLDER_FEATURE, "")
 
-    def _effective_vm_folder(
-        self, vm_entry: VMEntry, scope: Optional[str] = None
-    ) -> str:
-        """Resolve VM folder name to an existing folder in current scope.
+    def _effective_vm_folder(self, vm_entry: VMEntry) -> str:
+        """Resolve the VM folder name to an existing folder.
 
         Unknown/missing folder names are treated as Ungrouped to avoid
-        orphaned rows when folder metadata and folder list are temporarily out
-        of sync.
+        orphaned rows when the folder list and VM folder features are
+        temporarily out of sync.
         """
-        folder_name = self._vm_folder(vm_entry, scope)
+        folder_name = self._vm_folder(vm_entry)
         if not folder_name:
             return self.UNGROUPED
         if folder_name not in self.folder_order:
@@ -328,32 +301,50 @@ class AppPage(MenuPage):
         return folder_name
 
     @staticmethod
-    def _set_vm_folder(vm_entry: VMEntry, folder_name: str, scope: str):
-        """Set *folder_name* for *vm_entry* in *scope*.
-
-        Stores a JSON dict keyed by scope so that multi-scope VMs can carry
-        independent folder assignments per scope.
-        """
-        raw = AppPage._safe_feature_get(vm_entry.vm, constants.FOLDER_FEATURE, "{}")
+    def _set_vm_folder(vm_entry: VMEntry, folder_name: str):
+        """Set *folder_name* on *vm_entry* or clear the assignment."""
         try:
-            data = json.loads(raw) if raw else {}
-        except (TypeError, json.JSONDecodeError):
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
-
-        if folder_name:
-            data[scope] = folder_name
-            vm_entry.vm.features[constants.FOLDER_FEATURE] = json.dumps(data)
-        else:
-            data.pop(scope, None)
-            if data:
-                vm_entry.vm.features[constants.FOLDER_FEATURE] = json.dumps(data)
+            if folder_name:
+                vm_entry.vm.features[constants.FOLDER_FEATURE] = folder_name
             else:
-                try:
-                    del vm_entry.vm.features[constants.FOLDER_FEATURE]
-                except KeyError:
-                    pass
+                del vm_entry.vm.features[constants.FOLDER_FEATURE]
+        except KeyError:
+            pass
+
+    def _used_folder_names(self, vm_entries) -> Set[str]:
+        """Return the set of folder names actually assigned to VMs."""
+        used: Set[str] = set()
+        for vm_entry in vm_entries:
+            folder = self._vm_folder(vm_entry)
+            if folder and folder != self.UNGROUPED:
+                used.add(folder)
+        return used
+
+    def _order_folders(self, folders: List[str], used: Set[str]) -> List[str]:
+        """Return the folder list preserving the stored order, filtered
+        to the folders that are actually in use.
+
+        Folders are derived from per-VM membership: names no qube is
+        assigned to disappear immediately, so empty sections are never
+        displayed. Ungrouped is the virtual fallback bucket for unassigned
+        qubes - it is never removed and keeps the position the user placed
+        it in; only a brand-new install (no stored order yet) defaults to
+        putting it first. No folder is ever pinned to a specific index.
+        """
+        result: List[str] = []
+        for name in folders:
+            if name == self.UNGROUPED:
+                if self.UNGROUPED not in result:
+                    result.append(self.UNGROUPED)
+                continue
+            if name in used and name not in result:
+                result.append(name)
+        for name in sorted(used):
+            if name not in result:
+                result.append(name)
+        if self.UNGROUPED not in result:
+            result.insert(0, self.UNGROUPED)
+        return result
 
     @staticmethod
     def _safe_feature_get(vm, feature_name: str, default=""):
@@ -457,7 +448,7 @@ class AppPage(MenuPage):
 
         move_to_folder = Gtk.MenuItem(label="Move to folder")
         move_to_folder.set_submenu(
-            self._folder_selection_menu(row.vm_entry, include_remove=False)
+            self._folder_selection_menu(row.vm_entry, include_remove=True)
         )
         menu.add(move_to_folder)
 
@@ -469,10 +460,12 @@ class AppPage(MenuPage):
         current_folder = self._vm_folder(vm_entry) or self.UNGROUPED
 
         for folder_name in self.folder_order:
-            if folder_name == current_folder:
+            if folder_name in (current_folder, self.UNGROUPED):
                 continue
             item = Gtk.MenuItem(label=folder_name)
-            item.connect("activate", self._assign_folder_to_vm, vm_entry, folder_name)
+            item.connect(
+                "activate", self._assign_folder_to_vm, vm_entry, folder_name
+            )
             submenu.add(item)
 
         create_item = Gtk.MenuItem(label="Create new folder…")
@@ -481,7 +474,9 @@ class AppPage(MenuPage):
 
         if include_remove:
             remove_item = Gtk.MenuItem(label="Remove from folder")
-            remove_item.connect("activate", self._assign_folder_to_vm, vm_entry, "")
+            remove_item.connect(
+                "activate", self._assign_folder_to_vm, vm_entry, ""
+            )
             submenu.add(remove_item)
 
         submenu.show_all()
@@ -496,7 +491,9 @@ class AppPage(MenuPage):
             return
         self._assign_folder(vm_entry, folder_name)
 
-    def _assign_folder_to_vm(self, _widget, vm_entry: VMEntry, folder_name: str):
+    def _assign_folder_to_vm(
+        self, _widget, vm_entry: VMEntry, folder_name: str
+    ):
         self._assign_folder(vm_entry, folder_name)
 
     def _rename_folder_from_row(self, _widget, row: VMRow):
@@ -526,18 +523,11 @@ class AppPage(MenuPage):
 
     def _assign_folder(self, vm_entry: VMEntry, folder_name: str):
         folder_name = folder_name.strip()
-        folder_added = False
-        if folder_name:
-            folder_added = folder_name not in self.folder_order
-            self._ensure_folder_exists(folder_name)
-            self._set_vm_folder(vm_entry, folder_name, self._current_scope())
-        else:
-            self._set_vm_folder(vm_entry, "", self._current_scope())
-        if folder_added:
-            self._save_scope_state()
-            self._rebuild_folder_rows()
-        self.vm_list.invalidate_sort()
-        self.vm_list.invalidate_filter()
+        self._set_vm_folder(vm_entry, folder_name)
+        # rebuild first so the new assignment is reflected in the derived
+        # folder list, then persist the updated order and collapsed state
+        self._schedule_folder_rebuild()
+        self._save_folder_state()
 
     def _rename_folder(self, old_name: str, new_name: str):
         new_name = new_name.strip()
@@ -558,42 +548,34 @@ class AppPage(MenuPage):
             if new_name:
                 self.collapsed_folders.add(new_name)
 
-        scope = self._current_scope()
         for vm_entry in self.vm_manager.vms.values():
             if self._vm_folder(vm_entry) != old_name:
                 continue
-            self._set_vm_folder(vm_entry, new_name if new_name else "", scope)
+            self._set_vm_folder(vm_entry, new_name if new_name else "")
 
-        self._save_scope_state()
-        self._rebuild_folder_rows()
-        self.vm_list.invalidate_filter()
-        self.vm_list.invalidate_sort()
+        self._save_folder_state()
+        self._schedule_folder_rebuild()
 
     def _delete_folder(self, folder_name: str):
         if folder_name in self.folder_order:
             self.folder_order.remove(folder_name)
         self.collapsed_folders.discard(folder_name)
 
-        scope = self._current_scope()
         for vm_entry in self.vm_manager.vms.values():
             if self._vm_folder(vm_entry) != folder_name:
                 continue
-            self._set_vm_folder(vm_entry, "", scope)
+            self._set_vm_folder(vm_entry, "")
 
-        self._save_scope_state()
-        self._rebuild_folder_rows()
-        self.vm_list.invalidate_filter()
-        self.vm_list.invalidate_sort()
+        self._save_folder_state()
+        self._schedule_folder_rebuild()
 
     def _create_folder(self, folder_name: str):
         folder_name = folder_name.strip()
         if not folder_name:
             return
         self._ensure_folder_exists(folder_name)
-        self._save_scope_state()
-        self._rebuild_folder_rows()
-        self.vm_list.invalidate_filter()
-        self.vm_list.invalidate_sort()
+        self._save_folder_state()
+        self._schedule_folder_rebuild()
 
     def _ensure_folder_exists(self, folder_name: str):
         folder_name = folder_name.strip()
@@ -612,7 +594,7 @@ class AppPage(MenuPage):
             folder_row.collapsed = True
 
         folder_row.update_contents()
-        self._save_scope_state()
+        self._save_folder_state()
         self.vm_list.invalidate_filter()
 
     def _show_folder_row_menu(self, row: FolderRow, event):
@@ -623,20 +605,26 @@ class AppPage(MenuPage):
 
         if row.folder_name != self.UNGROUPED:
             rename_folder = Gtk.MenuItem(label="Rename folder…")
-            rename_folder.connect("activate", self._rename_folder_from_folder_row, row)
+            rename_folder.connect(
+                "activate", self._rename_folder_from_folder_row, row
+            )
             menu.add(rename_folder)
 
             delete_folder = Gtk.MenuItem(label="Delete folder")
-            delete_folder.connect("activate", self._delete_folder_from_folder_row, row)
+            delete_folder.connect(
+                "activate", self._delete_folder_from_folder_row, row
+            )
             menu.add(delete_folder)
 
-        move_up = Gtk.MenuItem(label="Move folder up")
-        move_up.connect("activate", self._move_folder, row.folder_name, -1)
-        menu.add(move_up)
+        if self._visible_adjacent_folder(row.folder_name, -1) is not None:
+            move_up = Gtk.MenuItem(label="Move folder up")
+            move_up.connect("activate", self._move_folder, row.folder_name, -1)
+            menu.add(move_up)
 
-        move_down = Gtk.MenuItem(label="Move folder down")
-        move_down.connect("activate", self._move_folder, row.folder_name, 1)
-        menu.add(move_down)
+        if self._visible_adjacent_folder(row.folder_name, 1) is not None:
+            move_down = Gtk.MenuItem(label="Move folder down")
+            move_down.connect("activate", self._move_folder, row.folder_name, 1)
+            menu.add(move_down)
 
         collapse_all = Gtk.MenuItem(label="Collapse all")
         collapse_all.connect("activate", self._set_all_folders_collapsed, True)
@@ -668,20 +656,45 @@ class AppPage(MenuPage):
             return
         self._delete_folder(folder)
 
+    def _visible_adjacent_folder(
+        self, folder_name: str, direction: int
+    ) -> Optional[str]:
+        """Return the folder immediately before/after *folder_name* in the
+        currently visible order, or None if there is no such folder.
+
+        Moves operate on the *visible* sequence ("the folder up/down"), not
+        on the global order: folders in between may be hidden in the current
+        tab because they contain no qubes of this category, but they still
+        occupy their slots in ``folder_order``.
+        """
+        if folder_name not in self.folder_order:
+            return None
+        index = self.folder_order.index(folder_name) + direction
+        while 0 <= index < len(self.folder_order):
+            candidate = self.folder_order[index]
+            if self._folder_has_visible_vms(candidate):
+                return candidate
+            index += direction
+        return None
+
     def _move_folder(self, _widget, folder_name: str, direction: int):
         if folder_name not in self.folder_order:
             return
-        old_index = self.folder_order.index(folder_name)
-        new_index = old_index + direction
-        if new_index < 0 or new_index >= len(self.folder_order):
+        other = self._visible_adjacent_folder(folder_name, direction)
+        if other is None:
             return
-        self.folder_order.insert(new_index, self.folder_order.pop(old_index))
-        self._save_scope_state()
-        self._rebuild_folder_rows()
-        self.vm_list.invalidate_sort()
+        old_index = self.folder_order.index(folder_name)
+        other_index = self.folder_order.index(other)
+        # swap the two folders; hidden folders in between keep their slots
+        self.folder_order[old_index], self.folder_order[other_index] = (
+            self.folder_order[other_index],
+            self.folder_order[old_index],
+        )
+        self._save_folder_state()
+        self._schedule_folder_rebuild()
 
     def _set_all_folders_collapsed(self, _widget, collapsed: bool):
-        # mutate in place to preserve per-scope set references
+        # mutate in place to preserve set references held in folder rows
         self.collapsed_folders.clear()
         if collapsed:
             self.collapsed_folders.update(self.folder_order)
@@ -690,61 +703,68 @@ class AppPage(MenuPage):
             folder_row.collapsed = collapsed
             folder_row.update_contents()
 
-        self._save_scope_state()
+        self._save_folder_state()
         self.vm_list.invalidate_filter()
 
-    def _load_folder_state_all(self):
+    def _load_folder_state(self):
         try:
-            raw = self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "{}")
+            raw_order = str(
+                self.local_vm.features.get(self.FOLDER_ORDER_FEATURE, "")
+            ).split()
         except Exception:  # pylint: disable=broad-except
-            raw = "{}"
+            raw_order = []
         try:
-            parsed = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
-            parsed = {}
-
-        if not isinstance(parsed, dict):
-            parsed = {}
-
-        for scope in self.SCOPES:
-            scope_data = parsed.get(scope, {})
-            if not isinstance(scope_data, dict):
-                scope_data = {}
-            folders = scope_data.get("folders", [])
-            collapsed = scope_data.get("collapsed", [])
-
-            folders = [f for f in folders if isinstance(f, str) and f]
-            if self.UNGROUPED not in folders:
-                folders.insert(0, self.UNGROUPED)
-            allowed_collapsed = set(folders)
-            allowed_collapsed.add(self.UNGROUPED)
-            collapsed_set = {
-                f for f in collapsed if isinstance(f, str) and f in allowed_collapsed
-            }
-
-            self.scope_folder_order[scope] = folders
-            self.scope_collapsed_folders[scope] = collapsed_set
-
-    def _save_scope_state(self):
-        try:
-            raw = self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "{}")
+            raw_collapsed = str(
+                self.local_vm.features.get(self.FOLDER_COLLAPSED_FEATURE, "")
+            ).split()
         except Exception:  # pylint: disable=broad-except
-            raw = "{}"
-        try:
-            state = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
-            state = {}
-        if not isinstance(state, dict):
-            state = {}
+            raw_collapsed = []
 
-        scope = self._current_scope()
-        collapsed = [f for f in self.folder_order if f in self.collapsed_folders]
-        state[scope] = {"folders": self.folder_order, "collapsed": collapsed}
-        self.local_vm.features[self.FOLDER_COLLAPSED_FEATURE] = json.dumps(state)
-        self.scope_folder_order[scope] = self.folder_order.copy()
-        self.scope_collapsed_folders[scope] = self.collapsed_folders.copy()
+        used = self._used_folder_names(self.vm_manager.vms.values())
+        self.folder_order = self._order_folders(list(raw_order), used)
+        self.collapsed_folders = {
+            name for name in raw_collapsed if name in self.folder_order
+        }
+
+    def _save_folder_state(self):
+        collapsed = [
+            f for f in self.folder_order if f in self.collapsed_folders
+        ]
+        try:
+            self.local_vm.features[self.FOLDER_ORDER_FEATURE] = " ".join(
+                self.folder_order
+            )
+            self.local_vm.features[self.FOLDER_COLLAPSED_FEATURE] = " ".join(
+                collapsed
+            )
+        except Exception:  # pylint: disable=broad-except
+            # a wrapper, to make sure a qrexec problem does not crash the
+            # whole menu
+            pass
+
+    def _schedule_folder_rebuild(self):
+        """Rebuild the folder rows, deferred out of an open popup.
+
+        The menu-driven folder operations run inside a :class:`SelfAwareMenu`
+        item's activate handler; rebuilding the rows there removes and
+        re-creates the very row the popup is anchored on while Gtk is still
+        unmapping the menu, which GTK cannot handle reliably. Main-loop
+        rebuilds are therefore deferred via ``GLib.idle_add`` whenever a menu
+        is currently open; outside of menus the rebuild stays synchronous.
+        """
+        if SelfAwareMenu.OPEN_MENUS:
+            GLib.idle_add(self._rebuild_folder_rows)
+        else:
+            self._rebuild_folder_rows()
 
     def _rebuild_folder_rows(self):
+        # Reload the persisted folder state. This is done here (and not only
+        # at startup) because the folder list is derived from per-VM folder
+        # membership: until the VM list is populated there is no way to know
+        # which folders exist, so order and collapsed state must be
+        # recomputed against the loaded VMs.
+        self._load_folder_state()
+
         for child in list(self.vm_list.get_children()):
             if isinstance(child, FolderRow):
                 self.vm_list.remove(child)
@@ -848,10 +868,12 @@ class AppPage(MenuPage):
             return False
         if (
             appentry.app_info.vm
-            and appentry.app_info.vm.name != self.selected_vm_entry.vm_entry.vm_name
+            and appentry.app_info.vm.name
+            != self.selected_vm_entry.vm_entry.vm_name
         ):
             return (
-                self.selected_vm_entry.vm_entry.parent_vm == appentry.app_info.vm.name
+                self.selected_vm_entry.vm_entry.parent_vm
+                == appentry.app_info.vm.name
                 and not appentry.app_info.disposable
             )
         if self.selected_vm_entry.vm_entry.is_dispvm_template:
@@ -880,7 +902,6 @@ class AppPage(MenuPage):
     def _button_toggled(self, widget: Gtk.ToggleButton):
         if not widget.get_active():
             return
-        self._activate_scope_state()
         self._rebuild_folder_rows()
         self.vm_list.unselect_all()
         self.app_list.invalidate_filter()
@@ -908,7 +929,9 @@ class AppPage(MenuPage):
                 row.vm_entry, self.toggle_buttons.apps_toggle.get_active()
             )
             self.control_list.unselect_all()
-            self.app_list.ephemeral_vm = bool(self.selected_vm_entry.vm_entry.parent_vm)
+            self.app_list.ephemeral_vm = bool(
+                self.selected_vm_entry.vm_entry.parent_vm
+            )
         self.app_list.invalidate_filter()
 
     def _set_right_visibility(self, visibility: bool):

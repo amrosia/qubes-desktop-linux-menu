@@ -160,7 +160,8 @@ class AppPage(MenuPage):
     UNGROUPED = "Ungrouped"
 
     # Per-VM assignment is a single plain feature value; order and
-    # collapsed state are global dom0 features for all menu scopes.
+    # collapsed state are global features of the interface qube for
+    # all menu scopes.
     FOLDER_ORDER_FEATURE = constants.FOLDER_ORDER_FEATURE
     FOLDER_COLLAPSED_FEATURE = constants.FOLDER_COLLAPSED_FEATURE
 

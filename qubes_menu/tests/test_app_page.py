@@ -40,20 +40,21 @@ def _build_app_page(test_desktop_file_path, test_qapp, test_builder):
 
 def _install_fake_save(app_page, test_qapp):
     """Mirror _save_folder_state into the mock feature store; feature
-    writes through the dom0 qubesadmin wrapper raise and are swallowed."""
-    dom0_mock = test_qapp._qubes["dom0"]
+    writes through the interface qube qubesadmin wrapper raise and are
+    swallowed."""
+    guivm_mock = test_qapp._qubes["dom0"]
 
     def fake_save():
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] = (
+        guivm_mock.features[constants.FOLDER_ORDER_FEATURE] = (
             AppPage._encode_folder_list(app_page.folder_order)
         )
-        dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = (
+        guivm_mock.features[constants.FOLDER_COLLAPSED_FEATURE] = (
             AppPage._encode_folder_list(app_page.collapsed_folders)
         )
-        dom0_mock.update_calls()
+        guivm_mock.update_calls()
 
     app_page._save_folder_state = fake_save
-    return dom0_mock
+    return guivm_mock
 
 
 def _assign_folders(app_page, vm_manager, assignments):
@@ -241,7 +242,7 @@ def test_folder_move_and_collapsed_state_saved(
         test_desktop_file_path, test_qapp, test_builder
     )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-    dom0_mock = _install_fake_save(app_page, test_qapp)
+    guivm_mock = _install_fake_save(app_page, test_qapp)
     _assign_folders(
         app_page,
         vm_manager,
@@ -250,13 +251,13 @@ def test_folder_move_and_collapsed_state_saved(
 
     assert app_page.folder_order == [app_page.UNGROUPED, "A", "B", "C"]
     assert (
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] == "Ungrouped A B C"
+        guivm_mock.features[constants.FOLDER_ORDER_FEATURE] == "Ungrouped A B C"
     )
 
     app_page._move_folder(None, "B", -1)
     assert app_page.folder_order == [app_page.UNGROUPED, "B", "A", "C"]
     assert (
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE] == "Ungrouped B A C"
+        guivm_mock.features[constants.FOLDER_ORDER_FEATURE] == "Ungrouped B A C"
     )
 
     app_page._move_folder(None, "B", 1)
@@ -268,7 +269,7 @@ def test_folder_move_and_collapsed_state_saved(
 
     app_page._toggle_folder(folder_b)
     assert "B" in app_page.collapsed_folders
-    assert dom0_mock.features[constants.FOLDER_COLLAPSED_FEATURE] == "B"
+    assert guivm_mock.features[constants.FOLDER_COLLAPSED_FEATURE] == "B"
 
     app_page._set_all_folders_collapsed(None, True)
     assert set(app_page.folder_order) == app_page.collapsed_folders
@@ -284,7 +285,7 @@ def test_folder_reordering_is_not_pinned_to_ungrouped(
         test_desktop_file_path, test_qapp, test_builder
     )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-    dom0_mock = _install_fake_save(app_page, test_qapp)
+    guivm_mock = _install_fake_save(app_page, test_qapp)
     _assign_folders(
         app_page,
         vm_manager,
@@ -313,7 +314,7 @@ def test_folder_reordering_is_not_pinned_to_ungrouped(
         expected = expect_swap(app_page.folder_order, name, direction)
         app_page._move_folder(None, name, direction)
         assert app_page.folder_order == expected
-        assert dom0_mock.features[constants.FOLDER_ORDER_FEATURE] == " ".join(
+        assert guivm_mock.features[constants.FOLDER_ORDER_FEATURE] == " ".join(
             expected
         )
 
@@ -338,7 +339,7 @@ def test_folder_rebuild_is_deferred_while_popup_is_open(
         test_desktop_file_path, test_qapp, test_builder
     )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-    dom0_mock = _install_fake_save(app_page, test_qapp)
+    guivm_mock = _install_fake_save(app_page, test_qapp)
     _assign_folders(
         app_page,
         vm_manager,
@@ -363,7 +364,7 @@ def test_folder_rebuild_is_deferred_while_popup_is_open(
             "C",
         ]
         assert (
-            dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
+            guivm_mock.features[constants.FOLDER_ORDER_FEATURE]
             == "Ungrouped B A C"
         )
 
@@ -515,7 +516,7 @@ def test_folder_state_with_names_containing_spaces(
         test_desktop_file_path, test_qapp, test_builder
     )
     app_page.toggle_buttons.apps_toggle.set_active(True)
-    dom0_mock = _install_fake_save(app_page, test_qapp)
+    guivm_mock = _install_fake_save(app_page, test_qapp)
 
     vm_entry = vm_manager.load_vm_from_name("test-red")
     assert vm_entry
@@ -524,7 +525,7 @@ def test_folder_state_with_names_containing_spaces(
 
     assert app_page.folder_order == [app_page.UNGROUPED, "sys usb"]
     assert (
-        dom0_mock.features[constants.FOLDER_ORDER_FEATURE]
+        guivm_mock.features[constants.FOLDER_ORDER_FEATURE]
         == "Ungrouped sys\\ usb"
     )
 
